@@ -17,6 +17,7 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 log = logging.getLogger("smart-media")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 WEBAPP_URL = os.getenv("WEBAPP_URL", "").rstrip("/")
+WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
 MAX_FILE_MB = int(os.getenv("MAX_FILE_MB", "45"))
 MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024
 ALLOWED_USERS = {x.strip() for x in os.getenv("ALLOWED_USER_IDS", "").split(",") if x.strip()}
@@ -82,6 +83,21 @@ def extract_info(url):
     except Exception as e:
         log.warning("extract failed: %s", e)
         raise HTTPException(422, "تعذر تحليل الرابط. تأكد أنه عام ومدعوم.")
+
+@app.post("/telegram/webhook")
+async def telegram_webhook(request: Request):
+    if not WEBHOOK_SECRET or not secrets.compare_digest(request.headers.get("X-Telegram-Bot-Api-Secret-Token", ""), WEBHOOK_SECRET):
+        raise HTTPException(403, "Forbidden")
+    if bot_app is None:
+        raise HTTPException(503, "Bot is starting")
+    try:
+        payload = await request.json()
+        update = Update.de_json(payload, bot_app.bot)
+        await bot_app.process_update(update)
+        return {"ok": True}
+    except Exception:
+        log.exception("Telegram webhook update failed")
+        raise HTTPException(500, "Update processing failed")
 
 @app.get("/health")
 async def health(): return {"status": "ok"}
@@ -180,7 +196,15 @@ async def run_bot():
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_link))
     await bot_app.initialize()
     await bot_app.start()
-    await bot_app.updater.start_polling()
+    if not WEBAPP_URL or not WEBHOOK_SECRET:
+        raise RuntimeError("WEBAPP_URL and TELEGRAM_WEBHOOK_SECRET are required for webhook mode")
+    await bot_app.bot.set_webhook(
+        url=f"{WEBAPP_URL}/telegram/webhook",
+        secret_token=WEBHOOK_SECRET,
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=False,
+    )
+    log.info("Telegram webhook configured")
 
 async def main():
     await run_bot()
