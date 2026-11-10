@@ -11,6 +11,9 @@ import yt_dlp
 import uvicorn
 
 logging.basicConfig(level=logging.INFO)
+# Prevent HTTP client logs from exposing Telegram Bot API URLs (which contain the token).
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 log = logging.getLogger("smart-media")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 WEBAPP_URL = os.getenv("WEBAPP_URL", "").rstrip("/")
@@ -35,7 +38,7 @@ def verify_init_data(init_data: str):
         if not received or time.time() - auth_date > 86400:
             return None
         data_check = "\n".join(f"{k}={v}" for k, v in sorted(values.items()))
-        secret = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
+        secret = hmac.new(BOT_TOKEN.encode(), b"WebAppData", hashlib.sha256).digest()
         calculated = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(calculated, received):
             return None
